@@ -1,4 +1,8 @@
-require('dotenv').config();
+// Carregar variáveis de ambiente apenas em desenvolvimento
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -18,8 +22,17 @@ const io = socketIo(server, {
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0'; // Railway precisa bindingar em 0.0.0.0
 
+// Verificar se as variáveis de ambiente estão configuradas
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+if (!accountSid || !authToken) {
+  console.error('ERRO: Variáveis de ambiente TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN são obrigatórias!');
+  console.log('TWILIO_ACCOUNT_SID:', accountSid ? 'Configurado' : 'NÃO configurado');
+  console.log('TWILIO_AUTH_TOKEN:', authToken ? 'Configurado' : 'NÃO configurado');
+  process.exit(1);
+}
+
 const client = require('twilio')(accountSid, authToken);
 
 app.use(cors());
