@@ -22,6 +22,11 @@ const io = socketIo(server, {
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0'; // Railway precisa bindingar em 0.0.0.0
 
+console.log('=== CONFIGURAÇÃO DO SERVIDOR ===');
+console.log('PORT:', PORT);
+console.log('HOST:', HOST);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
 // Verificar se as variáveis de ambiente estão configuradas
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
