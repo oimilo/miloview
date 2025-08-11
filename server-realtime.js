@@ -26,14 +26,23 @@ const HOST = '0.0.0.0'; // Railway precisa bindingar em 0.0.0.0
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 
-if (!accountSid || !authToken) {
-  console.error('ERRO: Variáveis de ambiente TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN são obrigatórias!');
-  console.log('TWILIO_ACCOUNT_SID:', accountSid ? 'Configurado' : 'NÃO configurado');
-  console.log('TWILIO_AUTH_TOKEN:', authToken ? 'Configurado' : 'NÃO configurado');
-  process.exit(1);
-}
+let client = null;
+let isDemoMode = false;
 
-const client = require('twilio')(accountSid, authToken);
+if (!accountSid || !authToken) {
+  console.log('=== MODO DEMONSTRAÇÃO ===');
+  console.log('Twilio não configurado - rodando sem conexão com WhatsApp');
+  console.log('Para conectar ao WhatsApp, configure TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN');
+  isDemoMode = true;
+} else {
+  try {
+    client = require('twilio')(accountSid, authToken);
+    console.log('Twilio configurado com sucesso!');
+  } catch (error) {
+    console.error('Erro ao inicializar Twilio:', error.message);
+    isDemoMode = true;
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -45,8 +54,51 @@ let conversationCache = new Map();
 let lastApiCall = null;
 let isUpdating = false;
 
+// Função para gerar mensagens de demonstração
+function getDemoMessages() {
+  const demoMessages = [
+    {
+      sid: 'demo1',
+      from: 'whatsapp:+5511999887766',
+      to: 'whatsapp:+14155238886',
+      body: 'Olá! Esta é uma mensagem de demonstração.',
+      status: 'delivered',
+      dateCreated: new Date(),
+      dateSent: new Date(),
+      direction: 'inbound'
+    },
+    {
+      sid: 'demo2',
+      from: 'whatsapp:+14155238886',
+      to: 'whatsapp:+5511999887766',
+      body: 'Bem-vindo ao MiloView! Sistema funcionando em modo demo.',
+      status: 'sent',
+      dateCreated: new Date(Date.now() - 60000),
+      dateSent: new Date(Date.now() - 60000),
+      direction: 'outbound-api'
+    },
+    {
+      sid: 'demo3',
+      from: 'whatsapp:+5521987654321',
+      to: 'whatsapp:+14155238886',
+      body: 'Configure as variáveis TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN para conectar ao WhatsApp real.',
+      status: 'delivered',
+      dateCreated: new Date(Date.now() - 120000),
+      dateSent: new Date(Date.now() - 120000),
+      direction: 'inbound'
+    }
+  ];
+  
+  return demoMessages;
+}
+
 // Função para buscar todas as mensagens da API
 async function fetchAllMessages(dateRange = null) {
+  if (isDemoMode) {
+    console.log('Modo demonstração - retornando mensagens de exemplo');
+    return getDemoMessages();
+  }
+  
   if (isUpdating) {
     console.log('Atualização já em andamento...');
     return;
