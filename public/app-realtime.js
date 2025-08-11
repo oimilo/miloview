@@ -7,12 +7,46 @@ let autoRefreshInterval = null;
 let blockedNumbers = [];
 let currentTab = 'conversations';
 
+// Gerenciar sessão
+let sessionId = localStorage.getItem('sessionId');
+
 document.addEventListener('DOMContentLoaded', () => {
+    // Verificar sessão antes de inicializar
+    if (!sessionId) {
+        window.location.href = '/login.html';
+        return;
+    }
     initializeApp();
 });
 
+// Adicionar sessionId em todas as requisições
+async function fetchWithAuth(url, options = {}) {
+    if (!sessionId) {
+        window.location.href = '/login.html';
+        return;
+    }
+    
+    const authOptions = {
+        ...options,
+        headers: {
+            ...options.headers,
+            'X-Session-Id': sessionId
+        }
+    };
+    
+    const response = await fetch(url, authOptions);
+    
+    if (response.status === 401) {
+        localStorage.removeItem('sessionId');
+        window.location.href = '/login.html';
+        throw new Error('Sessão expirada');
+    }
+    
+    return response;
+}
+
 async function initializeApp() {
-    // Conectar ao WebSocket
+    // Conectar ao WebSocket com autenticação
     connectWebSocket();
     
     // Carregar números bloqueados ANTES das conversas
@@ -287,7 +321,7 @@ function setupEventListeners() {
         } else {
             // Fallback para API REST
             try {
-                const response = await fetch('/api/refresh', { method: 'POST' });
+                const response = await fetchWithAuth('/api/refresh', { method: 'POST' });
                 const result = await response.json();
                 
                 if (result.success) {
@@ -321,7 +355,7 @@ async function loadConversations(showLoading = true, useCache = true, updateOnly
     }
     
     try {
-        const response = await fetch('/api/conversations');
+        const response = await fetchWithAuth('/api/conversations');
         
         if (!response.ok) {
             throw new Error(`Erro: ${response.status}`);
@@ -697,7 +731,7 @@ async function toggleBlockNumber(phoneNumber) {
     const action = isBlocked ? 'unblock' : 'block';
     
     try {
-        const response = await fetch('/api/block-number', {
+        const response = await fetchWithAuth('/api/block-number', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ phoneNumber, action })
@@ -744,7 +778,7 @@ async function toggleBlockNumber(phoneNumber) {
 
 async function loadBlockedNumbers() {
     try {
-        const response = await fetch('/api/blocked-numbers');
+        const response = await fetchWithAuth('/api/blocked-numbers');
         const data = await response.json();
         
         if (data.success) {

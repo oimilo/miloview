@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const socketIo = require('socket.io');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +27,11 @@ console.log('=== CONFIGURAÇÃO DO SERVIDOR ===');
 console.log('PORT:', PORT);
 console.log('HOST:', HOST);
 console.log('NODE_ENV:', process.env.NODE_ENV);
+
+// Configuração de autenticação
+const AUTH_USERNAME = 'h2ofilms';
+const AUTH_PASSWORD = 'H2OFilms!';
+const sessions = new Map(); // Armazenar sessões em memória
 
 // Verificar se as variáveis de ambiente estão configuradas
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -51,6 +57,76 @@ if (!accountSid || !authToken) {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Middleware para verificar sessão
+function checkAuth(req, res, next) {
+  const sessionId = req.headers['x-session-id'] || req.query.session;
+  
+  if (sessionId && sessions.has(sessionId)) {
+    const session = sessions.get(sessionId);
+    if (session.expires > Date.now()) {
+      // Renovar sessão
+      session.expires = Date.now() + (24 * 60 * 60 * 1000); // 24 horas
+      req.session = session;
+      return next();
+    }
+  }
+  
+  // Se for requisição de API, retornar 401
+  if (req.path.startsWith('/api/') && req.path !== '/api/login') {
+    return res.status(401).json({ error: 'Não autorizado' });
+  }
+  
+  // Se for página, redirecionar para login
+  if (!req.path.startsWith('/login') && !req.path.endsWith('.css') && !req.path.endsWith('.js')) {
+    return res.redirect('/login.html');
+  }
+  
+  next();
+}
+
+// Rota de login (não protegida)
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  if (username === AUTH_USERNAME && password === AUTH_PASSWORD) {
+    // Criar sessão
+    const sessionId = crypto.randomBytes(32).toString('hex');
+    sessions.set(sessionId, {
+      username,
+      expires: Date.now() + (24 * 60 * 60 * 1000) // 24 horas
+    });
+    
+    res.json({ 
+      success: true, 
+      sessionId,
+      message: 'Login realizado com sucesso'
+    });
+  } else {
+    res.status(401).json({ 
+      success: false, 
+      message: 'Usuário ou senha incorretos'
+    });
+  }
+});
+
+// Rota de logout
+app.post('/api/logout', (req, res) => {
+  const sessionId = req.headers['x-session-id'] || req.query.session;
+  if (sessionId) {
+    sessions.delete(sessionId);
+  }
+  res.json({ success: true });
+});
+
+// Servir arquivos estáticos sem autenticação para login
+app.use('/login.html', express.static(path.join(__dirname, 'public', 'login.html')));
+
+// Aplicar autenticação para todas as outras rotas
+app.use(checkAuth);
+
+// Servir arquivos estáticos protegidos
 app.use(express.static('public'));
 
 // Cache para mensagens
