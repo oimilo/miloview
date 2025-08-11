@@ -61,7 +61,19 @@ app.use(express.urlencoded({ extended: true }));
 
 // Middleware para verificar sessão
 function checkAuth(req, res, next) {
-  const sessionId = req.headers['x-session-id'] || req.query.session;
+  // Permitir acesso ao login e recursos estáticos
+  if (req.path === '/login.html' || 
+      req.path === '/api/login' ||
+      req.path.endsWith('.css') || 
+      req.path.endsWith('.js') ||
+      req.path.endsWith('.ico')) {
+    return next();
+  }
+  
+  // Verificar sessão via cookie ou header
+  const sessionId = req.headers['x-session-id'] || 
+                   req.query.session || 
+                   req.headers.cookie?.split('sessionId=')[1]?.split(';')[0];
   
   if (sessionId && sessions.has(sessionId)) {
     const session = sessions.get(sessionId);
@@ -74,21 +86,29 @@ function checkAuth(req, res, next) {
   }
   
   // Se for requisição de API, retornar 401
-  if (req.path.startsWith('/api/') && req.path !== '/api/login') {
+  if (req.path.startsWith('/api/')) {
     return res.status(401).json({ error: 'Não autorizado' });
   }
   
-  // Se for página, redirecionar para login
-  if (!req.path.startsWith('/login') && !req.path.endsWith('.css') && !req.path.endsWith('.js')) {
+  // Se for página HTML, redirecionar para login
+  if (req.path === '/' || req.path.endsWith('.html')) {
     return res.redirect('/login.html');
   }
   
-  next();
+  // Bloquear acesso
+  res.status(401).send('Não autorizado');
 }
+
+// Servir página de login sem autenticação
+app.get('/login.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
 
 // Rota de login (não protegida)
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
+  
+  console.log('Tentativa de login:', { username, passwordLength: password?.length });
   
   if (username === AUTH_USERNAME && password === AUTH_PASSWORD) {
     // Criar sessão
@@ -98,12 +118,21 @@ app.post('/api/login', (req, res) => {
       expires: Date.now() + (24 * 60 * 60 * 1000) // 24 horas
     });
     
+    console.log('Login bem-sucedido para:', username);
+    
+    // Definir cookie também
+    res.cookie('sessionId', sessionId, {
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000
+    });
+    
     res.json({ 
       success: true, 
       sessionId,
       message: 'Login realizado com sucesso'
     });
   } else {
+    console.log('Login falhou - credenciais inválidas');
     res.status(401).json({ 
       success: false, 
       message: 'Usuário ou senha incorretos'
@@ -120,13 +149,10 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// Servir arquivos estáticos sem autenticação para login
-app.use('/login.html', express.static(path.join(__dirname, 'public', 'login.html')));
-
-// Aplicar autenticação para todas as outras rotas
+// Aplicar autenticação para todas as rotas
 app.use(checkAuth);
 
-// Servir arquivos estáticos protegidos
+// Servir arquivos estáticos após verificação
 app.use(express.static('public'));
 
 // Cache para mensagens
