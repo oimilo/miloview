@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milo View - Agente Deusa Xana</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar com lista de conversas -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-header">
+                    <div class="brand-logo">
+                        <div class="brand-info">
+                            <h2 class="brand-name">Milo View</h2>
+                            <span class="agent-name">Agente: Deusa Xana</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="messages-title">
+                    <h1>Mensagens</h1>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Buscar conversas...">
+                </div>
+            </div>
+            <div class="conversations-container">
+                <!-- Abas para Conversas e SPAM -->
+                <div class="tabs-header">
+                    <button class="tab-button active" id="conversationsTab">
+                        <span>Conversas</span>
+                        <span class="tab-count" id="conversationsCount"></span>
+                    </button>
+                    <button class="tab-button" id="spamTab">
+                        <span>🚫 SPAM</span>
+                        <span class="tab-count spam-count" id="spamCount">0</span>
+                    </button>
+                </div>
+                
+                <!-- Lista de Conversas -->
+                <div id="conversationsList" class="conversations-list tab-content active">
+                    <div class="loading-conversations">Carregando conversas...</div>
+                </div>
+                
+                <!-- Lista de SPAM -->
+                <div id="spamList" class="conversations-list tab-content">
+                    <div class="spam-empty">
+                        <p style="color: #8696a0; text-align: center; padding: 20px;">
+                            Nenhum número bloqueado
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Área principal do chat -->
+        <div class="main-chat">
+            <!-- Header do chat -->
+            <div class="chat-header" id="chatHeader" style="display: none;">
+                <button class="back-button" id="backButton">←</button>
+                <div class="contact-info">
+                    <div class="contact-avatar"></div>
+                    <div class="contact-details">
+                        <div class="contact-name" id="contactName"></div>
+                        <div class="contact-status" id="contactStatus"></div>
+                    </div>
+                </div>
+                <button class="refresh-button" id="refreshButton" title="Atualizar">⟳</button>
+                <button class="refresh-button" id="blockButton" title="Bloquear número">🚫</button>
+                <button class="refresh-button" id="loadAllButton" title="Carregar TODAS as mensagens">📥</button>
+                <button class="refresh-button" id="exportButton" title="Exportar mensagens">💾</button>
+            </div>
+
+            <!-- Área de mensagens -->
+            <div class="messages-area" id="messagesArea">
+                <div class="welcome-message">
+                        <h2>Milo View</h2>
+                    <p class="welcome-subtitle">Sistema de Mensagens</p>
+                    <div class="welcome-agent">
+                        <span class="agent-badge">Agente Ativo</span>
+                        <span class="agent-title">Deusa Xana</span>
+                    </div>
+                    <p class="welcome-instruction">Selecione uma conversa para começar</p>
+                </div>
+            </div>
+
+            <!-- Input de mensagem (desabilitado - apenas visualização) -->
+            <div class="message-input-area" id="messageInputArea" style="display: none;">
+                <div class="input-disabled-notice">
+                    Visualização apenas - Envio de mensagens indisponível
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app-realtime.js"></script>
+</body>
+</html>
