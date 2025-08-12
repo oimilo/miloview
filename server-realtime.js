@@ -242,12 +242,13 @@ async function fetchAllMessages(dateRange = null) {
       allMessages.push(message);
       messageCount++;
       
-      // Emitir progresso a cada 50 mensagens ou a cada 2 segundos
-      if (messageCount % 50 === 0 || Date.now() - lastProgress > 2000) {
+      // Emitir progresso a cada 25 mensagens ou a cada 1 segundo
+      if (messageCount % 25 === 0 || Date.now() - lastProgress > 1000) {
         console.log(`Processando: ${messageCount} mensagens carregadas...`);
         io.emit('loading-progress', {
           current: messageCount,
-          message: `Carregando ${messageCount} mensagens...`
+          message: `Sincronizando: ${messageCount} mensagens...`,
+          isInitialSync: messageCache.size === 0
         });
         lastProgress = Date.now();
       }
@@ -707,31 +708,64 @@ app.post('/api/sync-today', async (req, res) => {
   }
 });
 
+// Endpoint para verificar status do cache
+app.get('/api/cache-status', (req, res) => {
+  res.json({
+    hasCache: messageCache.size > 0,
+    messagesInCache: messageCache.size,
+    conversationsInCache: conversationCache.size,
+    lastSync: lastApiCall,
+    isUpdating: isUpdating,
+    isDemoMode: isDemoMode
+  });
+});
+
 // Inicialização
 async function initialize() {
+  console.log('🚀 Iniciando MiloView...');
+  
   // Tentar carregar cache de arquivo primeiro
   const fileLoaded = await loadFileCache();
   
-  if (!fileLoaded) {
-    console.log('Nenhum cache de arquivo encontrado. Buscando mensagens da API...');
-    // Buscar mensagens dos últimos 2 dias na inicialização
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    await fetchAllMessages({ after: twoDaysAgo.toISOString() });
+  if (!fileLoaded || messageCache.size === 0) {
+    console.log('🔄 Nenhum cache encontrado. Iniciando sincronização inicial completa...');
+    
+    // Notificar clientes que está fazendo sync inicial
+    io.emit('initial-sync-started', {
+      message: 'Sincronizando mensagens dos últimos 30 dias...',
+      timestamp: new Date()
+    });
+    
+    // Buscar mensagens dos últimos 30 dias na primeira vez
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    await fetchAllMessages({ after: thirtyDaysAgo.toISOString() });
+    
+    io.emit('initial-sync-complete', {
+      totalMessages: messageCache.size,
+      timestamp: new Date()
+    });
+    
+    console.log(`✅ Sincronização inicial completa: ${messageCache.size} mensagens`);
+  } else {
+    console.log(`📦 Cache carregado: ${messageCache.size} mensagens`);
+    
+    // Buscar apenas mensagens novas desde o último cache
+    await fetchNewMessages();
   }
   
-  // Configurar atualização automática a cada 15 segundos
+  // Configurar atualização automática a cada 10 segundos
   setInterval(async () => {
     await fetchNewMessages();
-  }, 15000);
+  }, 10000);
   
-  // Sincronização completa a cada 5 minutos
+  // Sincronização de mensagens recentes a cada 2 minutos
   setInterval(async () => {
     console.log('🔄 Sincronização periódica...');
-    const oneHourAgo = new Date();
-    oneHourAgo.setHours(oneHourAgo.getHours() - 1);
-    await fetchAllMessages({ after: oneHourAgo.toISOString() });
-  }, 300000);
+    const twoHoursAgo = new Date();
+    twoHoursAgo.setHours(twoHoursAgo.getHours() - 2);
+    await fetchAllMessages({ after: twoHoursAgo.toISOString() });
+  }, 120000);
   
   server.listen(PORT, HOST, () => {
     console.log(`🚀 Servidor em tempo real rodando`);

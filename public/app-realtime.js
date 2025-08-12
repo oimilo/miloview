@@ -49,6 +49,14 @@ async function initializeApp() {
     // Conectar ao WebSocket com autenticação
     connectWebSocket();
     
+    // Verificar status do cache primeiro
+    const cacheStatus = await checkCacheStatus();
+    
+    if (!cacheStatus.hasCache) {
+        // Mostrar tela de sincronização inicial
+        showInitialSyncScreen();
+    }
+    
     // Carregar números bloqueados ANTES das conversas
     await loadBlockedNumbers();
     
@@ -108,6 +116,18 @@ function connectWebSocket() {
         updateLoadingProgress(data);
     });
     
+    socket.on('initial-sync-started', (data) => {
+        console.log('Sincronização inicial iniciada:', data);
+        showInitialSyncScreen();
+    });
+    
+    socket.on('initial-sync-complete', (data) => {
+        console.log('Sincronização inicial completa:', data);
+        hideInitialSyncScreen();
+        showNotification(`✅ ${data.totalMessages} mensagens sincronizadas!`);
+        loadConversations(true);
+    });
+    
     socket.on('full-update-complete', () => {
         showNotification('Atualização completa concluída');
         loadConversations(true);
@@ -152,6 +172,10 @@ function updateConnectionStatus(connected) {
                 50% { opacity: 0.5; }
                 100% { opacity: 1; }
             }
+            @keyframes fadeOut {
+                from { opacity: 1; }
+                to { opacity: 0; }
+            }
         `;
         document.head.appendChild(style);
     }
@@ -183,6 +207,12 @@ function updateStatusBar(status) {
 }
 
 function updateLoadingProgress(progress) {
+    // Se é sincronização inicial, atualizar tela especial
+    if (progress.isInitialSync) {
+        updateInitialSyncProgress(progress);
+        return;
+    }
+    
     // Criar ou atualizar barra de progresso
     let progressBar = document.querySelector('.loading-progress-bar');
     if (!progressBar) {
@@ -220,14 +250,87 @@ function updateLoadingProgress(progress) {
         document.body.appendChild(progressText);
     }
     
-    progressText.textContent = `Carregando: ${progress.current} mensagens (Página ${progress.page})`;
+    progressText.textContent = progress.message || `Carregando: ${progress.current} mensagens`;
     
     // Remover após 3 segundos se não houver mais atualizações
     clearTimeout(progressText.hideTimeout);
     progressText.hideTimeout = setTimeout(() => {
-        progressBar.remove();
-        progressText.remove();
+        if (progressBar) progressBar.remove();
+        if (progressText) progressText.remove();
     }, 3000);
+}
+
+// Função para verificar status do cache
+async function checkCacheStatus() {
+    try {
+        const response = await fetchWithAuth('/api/cache-status');
+        if (response.ok) {
+            return await response.json();
+        }
+    } catch (error) {
+        console.error('Erro ao verificar cache:', error);
+    }
+    return { hasCache: false, messagesInCache: 0 };
+}
+
+// Mostrar tela de sincronização inicial
+function showInitialSyncScreen() {
+    let syncScreen = document.querySelector('.initial-sync-screen');
+    if (!syncScreen) {
+        syncScreen = document.createElement('div');
+        syncScreen.className = 'initial-sync-screen';
+        syncScreen.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            color: white;
+        `;
+        syncScreen.innerHTML = `
+            <div style="text-align: center;">
+                <h1 style="font-size: 48px; margin-bottom: 20px;">🚀</h1>
+                <h2 style="font-size: 24px; margin-bottom: 10px;">Bem-vindo ao MiloView!</h2>
+                <p style="font-size: 16px; opacity: 0.9; margin-bottom: 30px;">Sincronizando suas mensagens pela primeira vez...</p>
+                <div class="sync-progress" style="
+                    background: rgba(255,255,255,0.2);
+                    border-radius: 10px;
+                    padding: 20px;
+                    min-width: 300px;
+                ">
+                    <div class="sync-counter" style="font-size: 32px; font-weight: bold; margin-bottom: 10px;">0</div>
+                    <div class="sync-message" style="font-size: 14px; opacity: 0.9;">Preparando...</div>
+                </div>
+                <div style="margin-top: 30px; font-size: 12px; opacity: 0.7;">
+                    Isso pode levar alguns minutos na primeira vez
+                </div>
+            </div>
+        `;
+        document.body.appendChild(syncScreen);
+    }
+}
+
+// Atualizar progresso da sincronização inicial
+function updateInitialSyncProgress(progress) {
+    const counter = document.querySelector('.sync-counter');
+    const message = document.querySelector('.sync-message');
+    if (counter) counter.textContent = progress.current;
+    if (message) message.textContent = progress.message;
+}
+
+// Esconder tela de sincronização inicial
+function hideInitialSyncScreen() {
+    const syncScreen = document.querySelector('.initial-sync-screen');
+    if (syncScreen) {
+        syncScreen.style.animation = 'fadeOut 0.5s';
+        setTimeout(() => syncScreen.remove(), 500);
+    }
 }
 
 function showNotification(message, type = 'success') {
