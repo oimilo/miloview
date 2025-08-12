@@ -233,32 +233,69 @@ async function fetchAllMessages(dateRange = null) {
       console.log(`Buscando mensagens dos últimos 7 dias (desde ${sevenDaysAgo.toISOString()})`);
     }
     
-    // Usar o método each para buscar TODAS as mensagens
-    console.log('Buscando mensagens usando método each()...');
+    // Usar list com limit alto para buscar mensagens
+    console.log('Buscando mensagens do Twilio...');
     let messageCount = 0;
-    let lastProgress = Date.now();
+    let pageToken = null;
+    let hasMore = true;
     
-    await client.messages.each(options, (message) => {
-      allMessages.push(message);
-      messageCount++;
-      
-      // Emitir progresso a cada 25 mensagens ou a cada 1 segundo
-      if (messageCount % 25 === 0 || Date.now() - lastProgress > 1000) {
-        console.log(`Processando: ${messageCount} mensagens carregadas...`);
-        io.emit('loading-progress', {
-          current: messageCount,
-          message: `Sincronizando: ${messageCount} mensagens...`,
-          isInitialSync: messageCache.size === 0
-        });
-        lastProgress = Date.now();
+    // Configurar limite por página
+    options.limit = 1000; // Máximo permitido pela API
+    
+    while (hasMore && messageCount < 10000) {
+      try {
+        console.log(`Buscando página ${Math.floor(messageCount / 1000) + 1}...`);
+        
+        // Adicionar pageToken se não for a primeira página
+        if (pageToken) {
+          options.pageToken = pageToken;
+        }
+        
+        // Buscar mensagens
+        const messages = await client.messages.list(options);
+        
+        if (messages && messages.length > 0) {
+          allMessages.push(...messages);
+          messageCount += messages.length;
+          
+          console.log(`📦 ${messages.length} mensagens nesta página (Total: ${messageCount})`);
+          
+          // Emitir progresso
+          io.emit('loading-progress', {
+            current: messageCount,
+            message: `Sincronizando: ${messageCount} mensagens...`,
+            isInitialSync: messageCache.size === 0
+          });
+          
+          // Se recebeu menos mensagens que o limite, não há mais páginas
+          if (messages.length < options.limit) {
+            hasMore = false;
+            console.log('Última página alcançada');
+          } else {
+            // Tentar obter próxima página
+            // Para isso, pegamos o SID da última mensagem
+            const lastMessage = messages[messages.length - 1];
+            if (lastMessage && lastMessage.sid) {
+              pageToken = lastMessage.sid;
+            } else {
+              hasMore = false;
+            }
+          }
+        } else {
+          hasMore = false;
+          console.log('Nenhuma mensagem retornada');
+        }
+        
+        // Pequena pausa entre páginas
+        if (hasMore) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+      } catch (error) {
+        console.error('Erro ao buscar página:', error.message);
+        hasMore = false;
       }
-      
-      // Limitar a 10000 mensagens para evitar problemas de memória
-      if (messageCount >= 10000) {
-        console.log('Limite de 10000 mensagens atingido');
-        return false; // Para a iteração
-      }
-    });
+    }
     
     console.log(`✅ Total de mensagens carregadas do Twilio: ${allMessages.length}`);
     
@@ -718,6 +755,52 @@ app.get('/api/cache-status', (req, res) => {
     isUpdating: isUpdating,
     isDemoMode: isDemoMode
   });
+});
+
+// Endpoint para limpar cache do servidor e forçar nova sincronização
+app.post('/api/clear-cache', async (req, res) => {
+  try {
+    console.log('🗑️ Limpando cache do servidor...');
+    
+    // Limpar caches
+    messageCache.clear();
+    conversationCache.clear();
+    lastApiCall = null;
+    
+    // Deletar arquivos de backup se existirem
+    const exportDir = path.join(__dirname, 'exported_messages');
+    if (fs.existsSync(exportDir)) {
+      const folders = fs.readdirSync(exportDir);
+      folders.forEach(folder => {
+        const folderPath = path.join(exportDir, folder);
+        if (fs.statSync(folderPath).isDirectory()) {
+          fs.rmSync(folderPath, { recursive: true, force: true });
+        }
+      });
+    }
+    
+    console.log('✅ Cache limpo com sucesso');
+    
+    // Notificar clientes
+    io.emit('cache-cleared', {
+      timestamp: new Date()
+    });
+    
+    // Iniciar nova sincronização
+    console.log('🔄 Iniciando nova sincronização...');
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    await fetchAllMessages({ after: thirtyDaysAgo.toISOString() });
+    
+    res.json({
+      success: true,
+      message: 'Cache limpo e sincronização iniciada',
+      newMessageCount: messageCache.size
+    });
+  } catch (error) {
+    console.error('Erro ao limpar cache:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Inicialização
