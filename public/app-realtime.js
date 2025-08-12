@@ -564,33 +564,50 @@ function selectConversation(conversation) {
 async function loadConversationMessages(phoneNumber, showLoading = true) {
     const messagesArea = document.getElementById('messagesArea');
     
+    console.log(`📱 Carregando mensagens de: ${phoneNumber}`);
+    
     if (showLoading) {
         messagesArea.innerHTML = '<div class="loading-conversations">Carregando mensagens...</div>';
     }
     
     try {
-        const response = await fetch(`/api/conversation/${encodeURIComponent(phoneNumber)}`);
+        const response = await fetchWithAuth(`/api/conversation/${encodeURIComponent(phoneNumber)}`);
         
         if (!response.ok) {
-            throw new Error('Erro ao carregar mensagens');
+            throw new Error(`Erro ao carregar mensagens: ${response.status}`);
         }
         
         const data = await response.json();
         currentMessages = data.messages || [];
         
-        console.log(`${currentMessages.length} mensagens carregadas`);
+        console.log(`✅ ${currentMessages.length} mensagens carregadas`);
+        console.log(`📊 Status: isLive=${data.isLive}, fromCache=${data.fromCache}, needsSync=${data.needsSync}`);
+        
+        if (data.needsSync) {
+            console.log('⚠️ Sincronização necessária detectada');
+            showNotification('Sincronizando mensagens em background...', 'info');
+        }
         
         displayMessages(currentMessages);
         
         // Atualizar contador
         const contactStatus = document.getElementById('contactStatus');
         if (contactStatus) {
-            contactStatus.textContent = `${currentMessages.length} mensagens ${data.isLive ? '• Ao vivo' : ''}`;
+            let statusText = `${currentMessages.length} mensagens`;
+            if (data.isLive) statusText += ' • Ao vivo';
+            if (data.fromCache) statusText += ' • Cache';
+            if (data.needsSync) statusText += ' • Sincronizando...';
+            contactStatus.textContent = statusText;
         }
         
     } catch (error) {
-        console.error('Erro:', error);
-        messagesArea.innerHTML = '<div class="loading-conversations">Erro ao carregar mensagens</div>';
+        console.error('❌ Erro ao carregar mensagens:', error);
+        messagesArea.innerHTML = `
+            <div class="loading-conversations">
+                <div style="color: #f44336;">Erro ao carregar mensagens</div>
+                <div style="font-size: 12px; margin-top: 10px;">${error.message}</div>
+            </div>
+        `;
     }
 }
 

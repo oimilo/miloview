@@ -289,14 +289,17 @@ async function fetchAllMessages(dateRange = null) {
     
     console.log(`✅ Total de mensagens carregadas do Twilio: ${allMessages.length}`);
     
-    // Limpar e atualizar cache
+    // Limpar e atualizar cache de mensagens
+    console.log(`🗄️ Atualizando cache com ${allMessages.length} mensagens`);
     messageCache.clear();
     allMessages.forEach(msg => {
-      messageCache.set(msg.sid, msg);
+      if (msg.sid) {
+        messageCache.set(msg.sid, msg);
+      }
     });
     
-    // Atualizar conversas
-    updateConversationCache(allMessages);
+    // Atualizar conversas (limpar cache porque é sincronização completa)
+    updateConversationCache(allMessages, true);
     
     lastApiCall = new Date();
     
@@ -380,11 +383,11 @@ async function fetchNewMessages() {
     });
     
     if (addedCount > 0) {
-      console.log(`${addedCount} novas mensagens adicionadas ao cache`);
+      console.log(`✨ ${addedCount} novas mensagens adicionadas ao cache`);
       
-      // Atualizar cache de conversas
+      // Atualizar cache de conversas SEM limpar (incremental)
       const allMessages = Array.from(messageCache.values());
-      updateConversationCache(allMessages);
+      updateConversationCache(allMessages, false); // false = não limpar cache
       
       // Notificar clientes
       io.emit('new-messages', {
@@ -402,8 +405,13 @@ async function fetchNewMessages() {
 }
 
 // Função para atualizar cache de conversas
-function updateConversationCache(messages) {
-  conversationCache.clear();
+function updateConversationCache(messages, clearCache = true) {
+  console.log(`🔄 Atualizando cache de conversas (clearCache=${clearCache}, messages=${messages.length})`);
+  
+  // Só limpar o cache se for uma sincronização completa
+  if (clearCache) {
+    conversationCache.clear();
+  }
   
   // Usar Map para garantir mensagens únicas por SID
   const uniqueMessages = new Map();
@@ -412,6 +420,8 @@ function updateConversationCache(messages) {
       uniqueMessages.set(msg.sid, msg);
     }
   });
+  
+  console.log(`📊 Processando ${uniqueMessages.size} mensagens únicas`);
   
   // Processar apenas mensagens únicas
   uniqueMessages.forEach(msg => {
@@ -561,22 +571,54 @@ app.get('/api/conversation/:phoneNumber', async (req, res) => {
   try {
     const { phoneNumber } = req.params;
     
+    console.log(`📱 Buscando conversa: ${phoneNumber}`);
+    console.log(`📊 Cache status: ${conversationCache.size} conversas, ${messageCache.size} mensagens`);
+    
     // Buscar conversa do cache
     const conversation = conversationCache.get(phoneNumber);
     
     if (!conversation) {
-      // Se não encontrou, buscar da API
-      const messages = await client.messages.list({ limit: 100 });
-      const filtered = messages.filter(msg => 
-        msg.from === phoneNumber || msg.to === phoneNumber
-      );
+      console.log(`⚠️ Conversa ${phoneNumber} não encontrada no cache`);
       
-      res.json({
-        messages: filtered,
-        totalMessages: filtered.length,
-        isLive: false
-      });
+      // Se não tem cache, retornar vazio e forçar sincronização
+      if (messageCache.size === 0) {
+        console.log('🔄 Cache vazio, iniciando sincronização...');
+        // Iniciar sincronização em background
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        fetchAllMessages({ after: twoDaysAgo.toISOString() }).catch(console.error);
+        
+        res.json({
+          messages: [],
+          totalMessages: 0,
+          isLive: false,
+          needsSync: true
+        });
+      } else {
+        // Buscar no cache de mensagens
+        const messagesFromCache = [];
+        messageCache.forEach(msg => {
+          if (msg.from === phoneNumber || msg.to === phoneNumber) {
+            messagesFromCache.push(msg);
+          }
+        });
+        
+        console.log(`📦 ${messagesFromCache.length} mensagens encontradas no cache geral`);
+        
+        // Ordenar por data
+        const sortedMessages = messagesFromCache
+          .sort((a, b) => new Date(a.dateSent || a.dateCreated) - new Date(b.dateSent || b.dateCreated));
+        
+        res.json({
+          messages: sortedMessages,
+          totalMessages: sortedMessages.length,
+          isLive: false,
+          fromCache: true
+        });
+      }
     } else {
+      console.log(`✅ Conversa encontrada: ${conversation.messages.length} mensagens`);
+      
       // Ordenar mensagens por data
       const sortedMessages = conversation.messages
         .sort((a, b) => new Date(a.dateSent || a.dateCreated) - new Date(b.dateSent || b.dateCreated));
@@ -589,7 +631,7 @@ app.get('/api/conversation/:phoneNumber', async (req, res) => {
     }
     
   } catch (error) {
-    console.error('Erro ao buscar conversa:', error);
+    console.error('❌ Erro ao buscar conversa:', error);
     res.status(500).json({ error: 'Falha ao buscar conversa' });
   }
 });
