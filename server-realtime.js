@@ -233,67 +233,57 @@ async function fetchAllMessages(dateRange = null) {
       console.log(`Buscando mensagens dos últimos 7 dias (desde ${sevenDaysAgo.toISOString()})`);
     }
     
-    // Usar list com limit alto para buscar mensagens
+    // Buscar mensagens usando o método correto de paginação
     console.log('Buscando mensagens do Twilio...');
+    const seenSids = new Set(); // Para evitar duplicatas
     let messageCount = 0;
-    let pageToken = null;
-    let hasMore = true;
     
-    // Configurar limite por página
-    options.limit = 1000; // Máximo permitido pela API
-    
-    while (hasMore && messageCount < 10000) {
-      try {
-        console.log(`Buscando página ${Math.floor(messageCount / 1000) + 1}...`);
-        
-        // Adicionar pageToken se não for a primeira página
-        if (pageToken) {
-          options.pageToken = pageToken;
+    try {
+      // Usar o método each() corretamente com callback assíncrono
+      await client.messages.each(options, async (message) => {
+        // Verificar se já vimos esta mensagem
+        if (!seenSids.has(message.sid)) {
+          seenSids.add(message.sid);
+          allMessages.push(message);
+          messageCount++;
+          
+          // Emitir progresso a cada 25 mensagens
+          if (messageCount % 25 === 0) {
+            console.log(`📦 ${messageCount} mensagens carregadas...`);
+            io.emit('loading-progress', {
+              current: messageCount,
+              message: `Sincronizando: ${messageCount} mensagens...`,
+              isInitialSync: messageCache.size === 0
+            });
+          }
+          
+          // Limitar a 5000 mensagens por sincronização
+          if (messageCount >= 5000) {
+            console.log('Limite de 5000 mensagens atingido');
+            return false; // Para a iteração
+          }
         }
-        
-        // Buscar mensagens
+      });
+    } catch (error) {
+      console.error('Erro ao buscar mensagens:', error.message);
+      
+      // Fallback: usar list() se each() falhar
+      console.log('Tentando método alternativo...');
+      try {
+        options.limit = 1000;
         const messages = await client.messages.list(options);
         
-        if (messages && messages.length > 0) {
-          allMessages.push(...messages);
-          messageCount += messages.length;
-          
-          console.log(`📦 ${messages.length} mensagens nesta página (Total: ${messageCount})`);
-          
-          // Emitir progresso
-          io.emit('loading-progress', {
-            current: messageCount,
-            message: `Sincronizando: ${messageCount} mensagens...`,
-            isInitialSync: messageCache.size === 0
-          });
-          
-          // Se recebeu menos mensagens que o limite, não há mais páginas
-          if (messages.length < options.limit) {
-            hasMore = false;
-            console.log('Última página alcançada');
-          } else {
-            // Tentar obter próxima página
-            // Para isso, pegamos o SID da última mensagem
-            const lastMessage = messages[messages.length - 1];
-            if (lastMessage && lastMessage.sid) {
-              pageToken = lastMessage.sid;
-            } else {
-              hasMore = false;
-            }
+        messages.forEach(msg => {
+          if (!seenSids.has(msg.sid)) {
+            seenSids.add(msg.sid);
+            allMessages.push(msg);
+            messageCount++;
           }
-        } else {
-          hasMore = false;
-          console.log('Nenhuma mensagem retornada');
-        }
+        });
         
-        // Pequena pausa entre páginas
-        if (hasMore) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-      } catch (error) {
-        console.error('Erro ao buscar página:', error.message);
-        hasMore = false;
+        console.log(`📦 ${messageCount} mensagens carregadas via list()`);
+      } catch (listError) {
+        console.error('Erro no método alternativo:', listError.message);
       }
     }
     
@@ -415,7 +405,16 @@ async function fetchNewMessages() {
 function updateConversationCache(messages) {
   conversationCache.clear();
   
+  // Usar Map para garantir mensagens únicas por SID
+  const uniqueMessages = new Map();
   messages.forEach(msg => {
+    if (msg.sid && !uniqueMessages.has(msg.sid)) {
+      uniqueMessages.set(msg.sid, msg);
+    }
+  });
+  
+  // Processar apenas mensagens únicas
+  uniqueMessages.forEach(msg => {
     let contactNumber;
     if (msg.direction === 'inbound') {
       contactNumber = msg.from;
@@ -427,6 +426,7 @@ function updateConversationCache(messages) {
       conversationCache.set(contactNumber, {
         contactNumber: contactNumber,
         messages: [],
+        messagesSet: new Set(), // Para evitar duplicatas
         lastMessage: null,
         lastMessageDate: null,
         totalMessages: 0
@@ -434,15 +434,22 @@ function updateConversationCache(messages) {
     }
     
     const conv = conversationCache.get(contactNumber);
-    conv.messages.push(msg);
-    conv.totalMessages++;
     
-    const msgDate = new Date(msg.dateSent || msg.dateCreated);
-    if (!conv.lastMessageDate || msgDate > conv.lastMessageDate) {
-      conv.lastMessage = msg.body;
-      conv.lastMessageDate = msgDate;
+    // Adicionar apenas se não for duplicata
+    if (!conv.messagesSet.has(msg.sid)) {
+      conv.messagesSet.add(msg.sid);
+      conv.messages.push(msg);
+      conv.totalMessages++;
+      
+      const msgDate = new Date(msg.dateSent || msg.dateCreated);
+      if (!conv.lastMessageDate || msgDate > conv.lastMessageDate) {
+        conv.lastMessage = msg.body;
+        conv.lastMessageDate = msgDate;
+      }
     }
   });
+  
+  console.log(`📊 Cache atualizado: ${conversationCache.size} conversas, ${uniqueMessages.size} mensagens únicas`);
 }
 
 // Carregar cache do arquivo se existir
