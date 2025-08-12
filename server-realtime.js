@@ -382,7 +382,8 @@ async function saveMessagesToFile(messages) {
 
 // Função para buscar mensagens novas (incremental)
 async function fetchNewMessages() {
-  if (isUpdating) return;
+  if (isDemoMode) return 0;
+  if (isUpdating) return 0;
   
   try {
     const options = { limit: 100 };
@@ -392,7 +393,13 @@ async function fetchNewMessages() {
       const latestDate = Math.max(...Array.from(messageCache.values()).map(m => 
         new Date(m.dateSent || m.dateCreated).getTime()
       ));
-      options.dateSentAfter = new Date(latestDate);
+      // Adicionar 1 segundo para evitar duplicatas
+      options.dateSentAfter = new Date(latestDate + 1000);
+      console.log(`🔍 Buscando mensagens após: ${new Date(latestDate).toISOString()}`);
+    } else {
+      // Se não tem cache, não buscar nada (evita limpar cache acidentalmente)
+      console.log('⚠️ Cache vazio, pulando busca incremental');
+      return 0;
     }
     
     const newMessages = await client.messages.list(options);
@@ -430,10 +437,14 @@ async function fetchNewMessages() {
 // Função para atualizar cache de conversas
 function updateConversationCache(messages, clearCache = true) {
   console.log(`🔄 Atualizando cache de conversas (clearCache=${clearCache}, messages=${messages.length})`);
+  console.log(`📊 Cache atual: ${conversationCache.size} conversas, ${messageCache.size} mensagens`);
   
-  // Só limpar o cache se for uma sincronização completa
-  if (clearCache) {
+  // Só limpar o cache se for uma sincronização completa E explicitamente solicitado
+  if (clearCache === true && messages.length > 100) {
+    console.log('🗑️ Limpando cache de conversas para sincronização completa');
     conversationCache.clear();
+  } else {
+    console.log('✅ Mantendo cache existente (atualização incremental)');
   }
   
   // Usar Map para garantir mensagens únicas por SID
@@ -862,18 +873,19 @@ async function initialize() {
     await fetchNewMessages();
   }
   
-  // Configurar atualização automática a cada 10 segundos
+  // Configurar atualização automática a cada 10 segundos (SEM limpar cache)
   setInterval(async () => {
-    await fetchNewMessages();
+    try {
+      const count = await fetchNewMessages();
+      if (count > 0) {
+        console.log(`✨ ${count} novas mensagens encontradas`);
+      }
+    } catch (error) {
+      console.error('Erro na busca automática:', error.message);
+    }
   }, 10000);
   
-  // Sincronização de mensagens recentes a cada 2 minutos
-  setInterval(async () => {
-    console.log('🔄 Sincronização periódica...');
-    const twoHoursAgo = new Date();
-    twoHoursAgo.setHours(twoHoursAgo.getHours() - 2);
-    await fetchAllMessages({ after: twoHoursAgo.toISOString() });
-  }, 120000);
+  // REMOVIDO: Sincronização periódica que estava limpando o cache
   
   server.listen(PORT, HOST, () => {
     console.log(`🚀 Servidor em tempo real rodando`);
