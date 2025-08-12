@@ -127,15 +127,6 @@ function connectWebSocket() {
         showNotification(`✅ ${data.totalMessages} mensagens sincronizadas!`);
         loadConversations(true);
     });
-    
-    socket.on('full-update-complete', () => {
-        showNotification('Atualização completa concluída');
-        loadConversations(true);
-    });
-    
-    socket.on('update-error', (error) => {
-        showNotification(`Erro na atualização: ${error}`, 'error');
-    });
 }
 
 function updateConnectionStatus(connected) {

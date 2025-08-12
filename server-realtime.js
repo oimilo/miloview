@@ -507,21 +507,7 @@ io.on('connection', (socket) => {
     lastUpdate: lastApiCall
   });
   
-  // Cliente solicita atualização completa
-  socket.on('request-full-update', async () => {
-    try {
-      await fetchAllMessages();
-      socket.emit('full-update-complete');
-    } catch (error) {
-      socket.emit('update-error', error.message);
-    }
-  });
-  
-  // Cliente solicita verificar novas mensagens
-  socket.on('check-new-messages', async () => {
-    const count = await fetchNewMessages();
-    socket.emit('new-messages-checked', { newCount: count });
-  });
+  // Handlers removidos - sincronização agora é automática
   
   socket.on('disconnect', () => {
     console.log('Cliente desconectado:', socket.id);
@@ -646,19 +632,7 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
-app.post('/api/refresh', async (req, res) => {
-  try {
-    const { dateRange } = req.body;
-    await fetchAllMessages(dateRange);
-    res.json({
-      success: true,
-      totalMessages: messageCache.size,
-      conversations: conversationCache.size
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Endpoint removido - sincronização agora é automática
 
 // Endpoint para sincronização completa com Twilio
 app.post('/api/sync-twilio', async (req, res) => {
@@ -771,28 +745,7 @@ app.post('/api/sms-webhook', async (req, res) => {
   }
 });
 
-// Endpoint para buscar mensagens de hoje
-app.post('/api/sync-today', async (req, res) => {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    console.log('📅 Sincronizando mensagens de hoje...');
-    
-    await fetchAllMessages({
-      after: today.toISOString()
-    });
-    
-    res.json({
-      success: true,
-      totalMessages: messageCache.size,
-      conversations: conversationCache.size,
-      syncDate: today
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Endpoint removido - sincronização de hoje agora é automática
 
 // Endpoint para verificar status do cache
 app.get('/api/cache-status', (req, res) => {
