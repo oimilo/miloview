@@ -226,65 +226,88 @@ async function fetchAllMessages(dateRange = null) {
       if (dateRange.before) options.dateSentBefore = new Date(dateRange.before);
       console.log(`Buscando mensagens entre ${dateRange.after || 'início'} e ${dateRange.before || 'agora'}`);
     } else {
-      // Por padrão, buscar mensagens dos últimos 7 dias para evitar timeout
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      options.dateSentAfter = sevenDaysAgo;
-      console.log(`Buscando mensagens dos últimos 7 dias (desde ${sevenDaysAgo.toISOString()})`);
+      // Por padrão, buscar mensagens dos últimos 60 dias
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      options.dateSentAfter = sixtyDaysAgo;
+      console.log(`📅 Buscando mensagens dos últimos 60 dias (desde ${sixtyDaysAgo.toISOString()})`);
     }
     
-    // Buscar mensagens usando o método correto de paginação
-    console.log('Buscando mensagens do Twilio...');
-    const seenSids = new Set(); // Para evitar duplicatas
-    let messageCount = 0;
+    // Buscar TODAS as mensagens usando paginação confiável
+    console.log('🔄 Iniciando busca de mensagens do Twilio...');
+    const seenSids = new Set();
+    let pageCount = 0;
+    const maxMessages = 10000; // Limite máximo
     
     try {
-      // Usar o método each() corretamente com callback assíncrono
-      await client.messages.each(options, async (message) => {
-        // Verificar se já vimos esta mensagem
-        if (!seenSids.has(message.sid)) {
-          seenSids.add(message.sid);
-          allMessages.push(message);
-          messageCount++;
-          
-          // Emitir progresso a cada 25 mensagens
-          if (messageCount % 25 === 0) {
-            console.log(`📦 ${messageCount} mensagens carregadas...`);
-            io.emit('loading-progress', {
-              current: messageCount,
-              message: `Sincronizando: ${messageCount} mensagens...`,
-              isInitialSync: messageCache.size === 0
-            });
-          }
-          
-          // Limitar a 5000 mensagens por sincronização
-          if (messageCount >= 5000) {
-            console.log('Limite de 5000 mensagens atingido');
-            return false; // Para a iteração
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Erro ao buscar mensagens:', error.message);
+      // Configurar opções para buscar o máximo possível
+      options.limit = 1000; // Máximo por página
+      options.pageSize = 1000;
       
-      // Fallback: usar list() se each() falhar
-      console.log('Tentando método alternativo...');
-      try {
-        options.limit = 1000;
-        const messages = await client.messages.list(options);
+      console.log(`📅 Buscando mensagens desde: ${options.dateSentAfter || 'início'}`);
+      
+      // Buscar primeira página
+      let messages = await client.messages.list(options);
+      
+      while (messages && messages.length > 0) {
+        pageCount++;
+        console.log(`📦 Página ${pageCount}: ${messages.length} mensagens`);
         
+        // Adicionar mensagens únicas
         messages.forEach(msg => {
           if (!seenSids.has(msg.sid)) {
             seenSids.add(msg.sid);
             allMessages.push(msg);
-            messageCount++;
           }
         });
         
-        console.log(`📦 ${messageCount} mensagens carregadas via list()`);
-      } catch (listError) {
-        console.error('Erro no método alternativo:', listError.message);
+        // Emitir progresso
+        io.emit('loading-progress', {
+          current: allMessages.length,
+          message: `Sincronizando: ${allMessages.length} mensagens (Página ${pageCount})...`,
+          isInitialSync: messageCache.size === 0
+        });
+        
+        // Verificar limite
+        if (allMessages.length >= maxMessages) {
+          console.log(`⚠️ Limite de ${maxMessages} mensagens atingido`);
+          break;
+        }
+        
+        // Buscar próxima página
+        if (messages.length === 1000) {
+          // Ainda há mais mensagens
+          try {
+            // Usar a data da mensagem mais antiga como novo limite
+            const oldestMessage = messages[messages.length - 1];
+            const oldestDate = new Date(oldestMessage.dateSent || oldestMessage.dateCreated);
+            
+            // Buscar mensagens mais antigas que a última
+            options.dateSentBefore = oldestDate;
+            messages = await client.messages.list(options);
+            
+            // Evitar loop infinito
+            if (messages.length === 1 && seenSids.has(messages[0].sid)) {
+              break;
+            }
+          } catch (pageError) {
+            console.error('Erro ao buscar próxima página:', pageError.message);
+            break;
+          }
+        } else {
+          // Não há mais páginas
+          break;
+        }
+        
+        // Pequena pausa entre páginas
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
+      
+      console.log(`✅ Total: ${allMessages.length} mensagens únicas em ${pageCount} páginas`);
+      
+    } catch (error) {
+      console.error('❌ Erro ao buscar mensagens:', error.message);
+      console.error('Detalhes:', error);
     }
     
     console.log(`✅ Total de mensagens carregadas do Twilio: ${allMessages.length}`);
@@ -821,10 +844,10 @@ async function initialize() {
       timestamp: new Date()
     });
     
-    // Buscar mensagens dos últimos 30 dias na primeira vez
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    await fetchAllMessages({ after: thirtyDaysAgo.toISOString() });
+    // Buscar mensagens dos últimos 60 dias na primeira vez
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    await fetchAllMessages({ after: sixtyDaysAgo.toISOString() });
     
     io.emit('initial-sync-complete', {
       totalMessages: messageCache.size,
