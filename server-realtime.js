@@ -217,64 +217,47 @@ async function fetchAllMessages(dateRange = null) {
   try {
     console.log('Iniciando busca de TODAS as mensagens do Twilio...');
     
-    // Configurar opções de busca
-    const options = { pageSize: 1000 };
+    // Configurar opções de busca - REMOVER pageSize para usar o padrão
+    const options = {};
     
     // Se especificado período, adicionar filtros de data
     if (dateRange) {
       if (dateRange.after) options.dateSentAfter = new Date(dateRange.after);
       if (dateRange.before) options.dateSentBefore = new Date(dateRange.before);
       console.log(`Buscando mensagens entre ${dateRange.after || 'início'} e ${dateRange.before || 'agora'}`);
+    } else {
+      // Por padrão, buscar mensagens dos últimos 7 dias para evitar timeout
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      options.dateSentAfter = sevenDaysAgo;
+      console.log(`Buscando mensagens dos últimos 7 dias (desde ${sevenDaysAgo.toISOString()})`);
     }
     
-    let hasMore = true;
-    let page = null;
-    let pageCount = 0;
+    // Usar o método each para buscar TODAS as mensagens
+    console.log('Buscando mensagens usando método each()...');
+    let messageCount = 0;
+    let lastProgress = Date.now();
     
-    while (hasMore) {
-      pageCount++;
+    await client.messages.each(options, (message) => {
+      allMessages.push(message);
+      messageCount++;
       
-      try {
-        if (!page) {
-          // Primeira página
-          page = await client.messages.page(options);
-        } else {
-          // Próximas páginas
-          const nextPage = await page.nextPage();
-          if (!nextPage || nextPage.instances.length === 0) {
-            hasMore = false;
-            break;
-          }
-          page = nextPage;
-        }
-        
-        // Adicionar mensagens ao array
-        if (page && page.instances) {
-          allMessages.push(...page.instances);
-          console.log(`Página ${pageCount}: ${page.instances.length} mensagens (Total: ${allMessages.length})`);
-          
-          // Emitir progresso via WebSocket
-          io.emit('loading-progress', {
-            current: allMessages.length,
-            page: pageCount,
-            message: `Carregando página ${pageCount}...`
-          });
-          
-          // Se a página tem menos que o tamanho máximo, não há mais páginas
-          if (page.instances.length < 1000) {
-            hasMore = false;
-          }
-        }
-        
-        // Pequena pausa para não sobrecarregar a API
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-      } catch (pageError) {
-        console.error(`Erro na página ${pageCount}:`, pageError.message);
-        // Continuar mesmo se uma página falhar
-        hasMore = false;
+      // Emitir progresso a cada 50 mensagens ou a cada 2 segundos
+      if (messageCount % 50 === 0 || Date.now() - lastProgress > 2000) {
+        console.log(`Processando: ${messageCount} mensagens carregadas...`);
+        io.emit('loading-progress', {
+          current: messageCount,
+          message: `Carregando ${messageCount} mensagens...`
+        });
+        lastProgress = Date.now();
       }
-    }
+      
+      // Limitar a 10000 mensagens para evitar problemas de memória
+      if (messageCount >= 10000) {
+        console.log('Limite de 10000 mensagens atingido');
+        return false; // Para a iteração
+      }
+    });
     
     console.log(`✅ Total de mensagens carregadas do Twilio: ${allMessages.length}`);
     
@@ -595,14 +578,21 @@ app.post('/api/sync-twilio', async (req, res) => {
   try {
     console.log('📡 Iniciando sincronização completa com Twilio...');
     
-    // Buscar TODAS as mensagens do Twilio
-    await fetchAllMessages();
+    const { days = 7 } = req.body; // Permitir especificar quantos dias buscar
+    
+    // Buscar mensagens dos últimos X dias
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    console.log(`Buscando mensagens dos últimos ${days} dias...`);
+    await fetchAllMessages({ after: startDate.toISOString() });
     
     res.json({
       success: true,
       totalMessages: messageCache.size,
       conversations: conversationCache.size,
-      lastSync: lastApiCall
+      lastSync: lastApiCall,
+      period: `Últimos ${days} dias`
     });
   } catch (error) {
     console.error('Erro na sincronização:', error);
@@ -724,13 +714,24 @@ async function initialize() {
   
   if (!fileLoaded) {
     console.log('Nenhum cache de arquivo encontrado. Buscando mensagens da API...');
-    await fetchAllMessages();
+    // Buscar mensagens dos últimos 2 dias na inicialização
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    await fetchAllMessages({ after: twoDaysAgo.toISOString() });
   }
   
-  // Configurar atualização automática a cada 30 segundos
+  // Configurar atualização automática a cada 15 segundos
   setInterval(async () => {
     await fetchNewMessages();
-  }, 30000);
+  }, 15000);
+  
+  // Sincronização completa a cada 5 minutos
+  setInterval(async () => {
+    console.log('🔄 Sincronização periódica...');
+    const oneHourAgo = new Date();
+    oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+    await fetchAllMessages({ after: oneHourAgo.toISOString() });
+  }, 300000);
   
   server.listen(PORT, HOST, () => {
     console.log(`🚀 Servidor em tempo real rodando`);

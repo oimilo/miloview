@@ -345,6 +345,45 @@ function setupEventListeners() {
     document.getElementById('exportButton').addEventListener('click', () => {
         exportCurrentConversation();
     });
+    
+    // Botão sincronizar últimos 30 dias
+    document.getElementById('syncRecentButton').addEventListener('click', async () => {
+        if (!confirm('Isso irá buscar TODAS as mensagens dos últimos 30 dias. Pode demorar alguns minutos. Continuar?')) {
+            return;
+        }
+        
+        const button = document.getElementById('syncRecentButton');
+        button.disabled = true;
+        button.innerHTML = '⏳';
+        button.title = 'Sincronizando...';
+        
+        try {
+            showNotification('Iniciando sincronização dos últimos 30 dias...');
+            
+            const response = await fetchWithAuth('/api/sync-twilio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days: 30 })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showNotification(`✅ ${result.totalMessages} mensagens sincronizadas!`);
+                // Recarregar conversas
+                await loadConversations(true);
+            } else {
+                showNotification('Erro na sincronização', 'error');
+            }
+        } catch (error) {
+            console.error('Erro:', error);
+            showNotification('Erro ao sincronizar mensagens', 'error');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '🔄';
+            button.title = 'Sincronizar últimos 30 dias';
+        }
+    });
 }
 
 async function loadConversations(showLoading = true, useCache = true, updateOnly = false) {
